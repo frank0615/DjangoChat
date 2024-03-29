@@ -1,7 +1,8 @@
 from channels.generic.websocket import AsyncWebsocketConsumer
 import json
 from asgiref.sync import sync_to_async
-
+from . models import ChatRoom, ChatMessage
+from django.contrib.auth.models import User
 class ChatConsumer(AsyncWebsocketConsumer):
     
     async def connect(self):
@@ -13,8 +14,42 @@ class ChatConsumer(AsyncWebsocketConsumer):
         )
         await self.accept()
         
-    async def disconnect(self):
+    async def disconnect(self, close_code):
         await self.channel_layer.group_discard(
-            self.channel_layer,
-            self.room_group_name
+            self.room_group_name,
+            self.channel_name
+            )
+    
+    async def receive(self, text_data):
+        data = json.loads(text_data)
+        message = data['message']
+        username = data['username']
+        room = data['room']
+        
+        await self.channel_layer.group_send(
+            self.room_group_name,{
+               'type':'chat_message',
+               'message':message,
+               'username':username,
+               'room':room,
+            }
         )
+        
+        await self.save_message(username,room,message)
+    async def chat_message(self, event):
+        message = event['message']
+        username = event['username']
+        room = event['room']
+        
+        await self.send(text_data=json.dumps({
+            'message':message,
+            'username':username,
+            'room':room,
+        }))
+        
+    @sync_to_async
+    def save_message(self, username, room, message):
+        user = User.objects.get(username=username)
+        room = ChatRoom.objects.get(slug=room)
+        
+        ChatMessage.objects.create(user=user,room=room,message_content=message)
